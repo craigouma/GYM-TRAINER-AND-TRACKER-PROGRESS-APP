@@ -1,0 +1,239 @@
+import gym
+import sqlite3
+import datetime
+import pandas as pd
+import matplotlib.pyplot as plt
+
+# Connect to database
+conn = sqlite3.connect('gym_tracker.db')
+cursor = conn.cursor()
+
+# Create tables for workouts, exercises, and users
+cursor.execute("""CREATE TABLE workouts (
+                    workout_id INTEGER PRIMARY KEY,
+                    user_id INTEGER,
+                    workout_date DATE,
+                    workout_type TEXT,
+                    FOREIGN KEY (user_id) REFERENCES users(user_id)
+                )""")
+
+cursor.execute("""CREATE TABLE exercises (
+                    exercise_id INTEGER PRIMARY KEY,
+                    exercise_name TEXT,
+                    exercise_description TEXT,
+                    exercise_image BLOB,
+                    exercise_video BLOB
+                )""")
+
+cursor.execute("""CREATE TABLE users (
+                    user_id INTEGER PRIMARY KEY,
+                    username TEXT,
+                    password TEXT,
+                    email TEXT,
+                    first_name TEXT,
+                    last_name TEXT,
+                    gender CHAR,
+                    age INTEGER,
+                    weight FLOAT,
+                    height FLOAT,
+                    goal TEXT,
+                    trainer_id INTEGER,
+                    FOREIGN KEY (trainer_id) REFERENCES trainers(trainer_id)
+                )""")
+
+cursor.execute("""CREATE TABLE trainers (
+                    trainer_id INTEGER PRIMARY KEY,
+                    trainer_name TEXT,
+                    trainer_email TEXT,
+                    trainer_certification TEXT
+                )""")
+
+cursor.execute("""CREATE TABLE workout_exercises (
+                    workout_id INTEGER,
+                    exercise_id INTEGER,
+                    sets INTEGER,
+                    reps INTEGER,
+                    weight FLOAT,
+                    PRIMARY KEY (workout_id, exercise_id),
+                    FOREIGN KEY (workout_id) REFERENCES workouts(workout_id),
+                    FOREIGN KEY (exercise_id) REFERENCES exercises(exercise_id)
+                )""")
+
+cursor.execute("""CREATE TABLE training_plans (
+                    plan_id INTEGER PRIMARY KEY,
+                    plan_name TEXT,
+                    plan_description TEXT,
+                    user_id INTEGER,
+                    FOREIGN KEY (user_id) REFERENCES users(user_id)
+                )""")
+
+cursor.execute("""CREATE TABLE plan_exercises (
+                    plan_id INTEGER,
+                    exercise_id INTEGER,
+                    frequency INTEGER,
+                    PRIMARY KEY (plan_id, exercise_id),
+                    FOREIGN KEY (plan_id) REFERENCES training_plans(plan_id),
+                    FOREIGN KEY (exercise_id) REFERENCES exercises(exercise_id)
+                )""")
+
+cursor.execute("""CREATE TABLE food_intake (
+                    intake_id INTEGER PRIMARY KEY,
+                    user_id INTEGER,
+                    intake_date DATE,
+                    food_name TEXT,
+                    serving_size REAL,
+                    serving_unit TEXT,
+                    calories REAL,
+                    fat REAL,
+                    protein REAL,
+                    carbohydrates REAL
+                )""")
+# Create a function to log a workout
+def log_workout(user_id, workout_date, workout_type, exercises):
+    # Insert the workout into the workouts table
+    cursor.execute("""INSERT INTO workouts (user_id, workout_date, workout_type)
+                      VALUES (?,?,?)""", (user_id, workout_date, workout_type))
+    # Get the workout id of the inserted workout
+    workout_id = cursor.lastrowid
+    # Insert the exercises for the workout into the workout_exercises table
+    for exercise in exercises:
+        cursor.execute("""INSERT INTO workout_exercises (workout_id, exercise_id, sets, reps, weight)
+                          VALUES (?,?,?,?,?)""", (workout_id, exercise['id'], exercise['sets'], exercise['reps'], exercise['weight']))
+    # Commit the changes to the database
+    conn.commit()
+
+# Create a function to retrieve a user's workouts
+def get_user_workouts(user_id):
+    cursor.execute("""SELECT workouts.*, workout_exercises.*, exercises.*
+                      FROM workouts
+                      INNER JOIN workout_exercises
+                      ON workouts.workout_id = workout_exercises.workout_id
+                      INNER JOIN exercises
+                      ON workout_exercises.exercise_id = exercises.exercise_id
+                      WHERE workouts.user_id=?""", (user_id,))
+    workouts = cursor.fetchall()
+    return workouts
+
+# Create a function to retrieve a list of all exercises
+def get_exercise_list():
+    cursor.execute("SELECT * FROM exercises")
+    exercises = cursor.fetchall()
+    return exercises
+
+# Create a function to retrieve a specific exercise by id
+def get_exercise(exercise_id):
+    cursor.execute("SELECT * FROM exercises WHERE exercise_id=?", (exercise_id,))
+    exercise = cursor.fetchone()
+    return exercise
+
+# Create a function to create a custom training plan for a user
+def create_custom_plan(user_id, plan_name, plan_description, exercises):
+    # Insert the training plan into the training_plans table
+    cursor.execute("""INSERT INTO training_plans (plan_name, plan_description, user_id)
+                      VALUES (?,?,?)""", (plan_name, plan_description, user_id))
+    # Get the plan id of the inserted training plan
+    plan_id = cursor.lastrowid
+    # Insert the exercises for the plan into the plan_exercises table
+    for exercise in exercises:
+        cursor.execute("""INSERT INTO plan_exercises (plan_id, exercise_id, frequency)
+                          VALUES (?,?,?)""", (plan_id, exercise['id'], exercise['frequency']))
+    # Commit the changes to the database
+    conn.commit()
+
+# Create a function to retrieve a user's training plans
+def get_user_plans(user_id):
+    cursor.execute("""SELECT training_plans.*, plan_exercises.*, exercises.*
+                      FROM training_plans
+                      INNER JOIN plan_exercises
+                      ON training_plans.plan_id = plan_exercises.plan_id
+                      INNER JOIN exercises
+                      ON plan_exercises.exercise_id = exercises.exercise_id
+                      WHERE training_plans.user_id=?""", (user_id,))
+    plans = cursor.fetchall()
+    return plans
+
+# Create a function to log food intake for a user
+def log_food_intake(user_id, intake_date, food_items):
+    # Insert the food intake into the food_intake table
+    cursor.execute("""INSERT INTO food_intake (user_id, intake_date)
+                      VALUES (?,?)""", (user_id, intake_date))
+    # Get the intake id of the inserted food intake
+    intake_id = cursor.lastrowid
+    # Insert the food items for the intake into the intake_items table
+    for item in food_items:
+        cursor.execute("""INSERT INTO intake_items (intake_id, food_name, calories, protein, carbs, fat)
+                          VALUES (?,?,?,?,?,?)""", (intake_id, item['name'], item['calories'], item['protein'], item['carbs'], item['fat']))
+    # Commit the changes to the database
+    conn.commit()
+
+# Create a function to retrieve a user's food intake for a specific date
+def get_food_intake(user_id, intake_date):
+    cursor.execute("""SELECT food_intake.*, intake_items.*
+                      FROM food_intake
+                      INNER JOIN intake_items
+                      ON food_intake.intake_id = intake_items.intake_id
+                      WHERE food_intake.user_id=? AND food_intake.intake_date=?""", (user_id, intake_date))
+    intake = cursor.fetchall()
+    return intake
+
+# Create a function to retrieve a user's food intake for a range of dates
+def get_food_intake_range(user_id, start_date, end_date):
+    cursor.execute("""SELECT food_intake.*, intake_items.*
+                      FROM food_intake
+                      INNER JOIN intake_items
+                      ON food_intake.intake_id = intake_items.intake_id
+                      WHERE food_intake.user_id=? AND food_intake.intake_date BETWEEN ? AND ?""", (user_id, start_date, end_date))
+    intake = cursor.fetchall()
+    return intake
+
+# Create a function to plot a user's progress over time
+def plot_progress(user_id, metric):
+    # Retrieve the relevant data from the database
+    cursor.execute("SELECT workout_date, {} FROM workouts WHERE user_id=?".format(metric), (user_id,))
+    data = cursor.fetchall()
+    # Convert the data into a pandas DataFrame
+    df = pd.DataFrame(data, columns=['date', metric])
+    # Set the date column as the index
+    df.set_index('date', inplace=True)
+    # Plot the data
+    df.plot()
+    plt.show()
+
+# Create a function to send a notification to a user
+def send_notification(user_id, notification_type):
+    # Retrieve the user's email and notification preferences from the database
+    cursor.execute("SELECT email, {} FROM users WHERE user_id=?".format(notification_type), (user_id,))
+    user_info = cursor.fetchone()
+    # Check if the user has opted in to receive this type of notification
+    if user_info[notification_type]:
+        # Send the notification via email
+        send_email(user_info['email'], notification_type)
+
+# Create a function to recommend modifications to an exercise for a user
+def recommend_modifications(user_id, exercise_id):
+    # Retrieve the user's current fitness level and goal from the database
+    cursor.execute("SELECT fitness_level, goal FROM users WHERE user_id=?", (user_id,))
+    user_info = cursor.fetchone()
+    # Retrieve the difficulty level and muscle groups targeted by the exercise from the database
+    cursor.execute("SELECT difficulty, muscle_groups FROM exercises WHERE exercise_id=?", (exercise_id,))
+    exercise_info = cursor.fetchone()
+    # Make recommendations based on the user's fitness level and goal
+    if user_info['fitness_level'] == 'beginner':
+        if exercise_info['difficulty'] == 'advanced':
+            print("We recommend reducing the weight or number of reps for this exercise.")
+        if 'legs' in exercise_info['muscle_groups'] and user_info['goal'] == 'upper body strength':
+            print("We recommend substituting this exercise with one that targets upper body muscles.")
+    if user_info['fitness_level'] == 'intermediate':
+        if exercise_info['difficulty'] == 'beginner':
+            print("We recommend increasing the weight or number of reps for this exercise.")
+        if 'legs' in exercise_info['muscle_groups'] and user_info['goal'] == 'upper body strength':
+            print("We recommend incorporating this exercise into your training plan to improve overall body balance.")
+    if user_info['fitness_level'] == 'advanced':
+        if exercise_info['difficulty'] == 'beginner':
+            print("We recommend increasing the weight or number of reps for this exercise.")
+        if 'legs' in exercise_info['muscle_groups'] and user_info['goal'] == 'upper body strength':
+            print("We recommend incorporating this exercise into your training plan to improve overall body balance.")
+
+# Close the database connection
+conn.close()
+``
